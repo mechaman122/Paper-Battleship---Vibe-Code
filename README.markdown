@@ -2,6 +2,9 @@
 
 A 2D Battleship game built with Godot, featuring matchmaking against AI or players, ship placement, and turn-based attacks. Future updates will include passives and special abilities.
 
+## Disclaimer
+This is a personal project to demonstrate how AI can handle coding with strict human guidance (a.k.a me), hence the name vibe-coding. 90% of the code is AI-generated, with logical setup proposed and improvised by me.
+
 ## Requirements
 - Matchmaking system for AI or player opponents.
 - Grid-based field for ship placement (e.g., 10x10).

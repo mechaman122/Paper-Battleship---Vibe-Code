@@ -1,5 +1,8 @@
 extends Node2D
 
+const ShipScene = preload("res://scenes/ship.tscn") # Preload the ship scene
+const ShipPartTexture = preload("res://assets/placeholders/ship_part.png") # Load the texture
+
 # Grid dimensions
 const GRID_WIDTH: int = 10
 const GRID_HEIGHT: int = 10
@@ -45,8 +48,10 @@ var game_over: bool = false
 var enemy_ai: EnemyAI
 
 # References to the tilemap layers
-@onready var player_grid: TileMapLayer = $PlayerGrid
+@onready var player_grid_base: TileMapLayer = $PlayerGrid_Base # Renamed
+@onready var player_grid_overlay: TileMapLayer = $PlayerGrid_Overlay # Added
 @onready var enemy_grid: TileMapLayer = $EnemyGrid
+@onready var ships_container: Node2D = $ShipsContainer # Reference to the container
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -78,6 +83,10 @@ func reset_game_board() -> void:
 	# Reset UI Labels
 	%TurnStatusLabel.text = "Player's Turn"
 	%MessageLabel.text = ""
+	# Initialize ship count labels
+	var initial_ship_count = SHIP_SIZES.size()
+	%PlayerShipLabel.text = "Player Ships Left: %d" % initial_ship_count
+	%EnemyShipLabel.text = "Enemy Ships Left: %d" % initial_ship_count
 
 	# Generate new ship placements for both players
 	player_ship_locations = _generate_ship_placements(SHIP_SIZES)
@@ -99,21 +108,44 @@ func reset_game_board() -> void:
 		enemy_ai = EnemyAI.new()
 		enemy_ai.reset(GRID_WIDTH, GRID_HEIGHT)
 
-	# Re-add sea tiles to both grids
+	# Re-add sea tiles to base player grid and enemy grid
+	# Clear the player overlay grid
+	player_grid_overlay.clear() # Clear previous hits/misses
 	for x in range(GRID_WIDTH):
 		for y in range(GRID_HEIGHT):
-			player_grid.set_cell(Vector2i(x, y), SEA_SOURCE_ID, SEA_ATLAS_COORDS)
+			player_grid_base.set_cell(Vector2i(x, y), SEA_SOURCE_ID, SEA_ATLAS_COORDS) # Use base grid
 			enemy_grid.set_cell(Vector2i(x, y), SEA_SOURCE_ID, SEA_ATLAS_COORDS)
 	
-	# Draw player ships onto the player grid based on generated locations
-	# Need to iterate through each ship, then each coord within the ship
-	for ship in player_ship_locations:
-		for ship_pos in ship:
-			# Generation function ensures these coords are valid
-			player_grid.set_cell(ship_pos, SHIP_SOURCE_ID, SHIP_ATLAS_COORDS)
+	# Clear any existing ship instances from the container
+	for ship_node in ships_container.get_children():
+		ship_node.queue_free()
 
-	# Make sure input is enabled at the start -- MOVED TO START OF FUNCTION
-	# set_process_input(true)
+	# Instantiate and place ship instances based on generated locations
+	for ship_coords_array in player_ship_locations:
+		if ship_coords_array.is_empty(): # Skip if something went wrong in generation
+			continue 
+			
+		# Instantiate a ship scene
+		var ship_instance = ShipScene.instantiate()
+
+		# Get the first coordinate to determine the ship instance's main position
+		var first_coord: Vector2i = ship_coords_array[0]
+		# Calculate the absolute screen position for the ship instance
+		# Use base grid for positioning reference
+		var absolute_pos: Vector2 = player_grid_base.position + player_grid_base.map_to_local(first_coord) 
+		ship_instance.position = absolute_pos
+
+		# Get the tile size from the base grid's TileSet
+		var tile_size: Vector2 = player_grid_base.tile_set.tile_size 
+		
+		# Call the ship's setup function to create its parts
+		ship_instance.setup(ship_coords_array, ShipPartTexture, tile_size)
+		
+		# Add the configured ship instance to the container
+		ships_container.add_child(ship_instance)
+
+	# Make sure input is enabled at the start
+	set_process_input(true)
 
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
@@ -195,7 +227,7 @@ func execute_enemy_turn() -> void:
 	print("Enemy attacks player at: ", target_coord)
 	
 	# Process the attack
-	var _game_ended: bool = _process_attack(target_coord, player_grid, player_ship_locations, player_hit_locations, player_sunk_ships, "Enemy", "Player")
+	var _game_ended: bool = _process_attack(target_coord, player_grid_overlay, player_ship_locations, player_hit_locations, player_sunk_ships, "Enemy", "Player")
 
 	# Re-enable input after attack processing is complete
 	set_process_input(true)
@@ -206,6 +238,8 @@ func execute_enemy_turn() -> void:
 
 # Centralized function to process an attack on a coordinate
 # Returns true if the attack resulted in game over, false otherwise
+# The 'grid' parameter now refers to the grid where hits/misses should be drawn
+# For the player, this is the overlay grid. For the enemy, it's their main grid.
 func _process_attack(coord: Vector2i, grid: TileMapLayer, ship_locations: Array, hit_locations: Array, sunk_ships: Array, attacker_name: String, defender_name: String) -> bool:
 	var hit_ship_flag: bool = false
 	var hit_ship_index: int = -1
@@ -239,6 +273,15 @@ func _process_attack(coord: Vector2i, grid: TileMapLayer, ship_locations: Array,
 			for wreck_coord in target_ship:
 				grid.set_cell(wreck_coord, WRECK_SOURCE_ID, WRECK_ATLAS_COORDS)
 			# Consider how this message interacts with the win message
+
+			# --- Update Ship Count UI ---
+			if defender_name == "Player":
+				var player_ships_left = player_ship_locations.size() - player_sunk_ships.size()
+				%PlayerShipLabel.text = "Player Ships Left: %d" % player_ships_left
+			elif defender_name == "Enemy":
+				var enemy_ships_left = enemy_ship_locations.size() - enemy_sunk_ships.size()
+				%EnemyShipLabel.text = "Enemy Ships Left: %d" % enemy_ships_left
+			# --------------------------
 	else:
 		# It's a miss
 		print(attacker_name, " Miss.")
